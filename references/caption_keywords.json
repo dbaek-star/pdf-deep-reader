@@ -1,0 +1,9 @@
+{
+  "vision_target_keywords": {
+    "en": ["Figure", "Fig.", "Fig ", "Table", "Chart", "Diagram", "Graph", "Plot", "Illustration"],
+    "ko": ["그림", "표", "도", "Figure", "Table", "추이", "변화", "비교", "현황", "분포", "사용량", "변동", "증감"]
+  },
+  "vision_fallback_threshold": {
+    "min_text_chars_per_page": 100
+  }
+}
