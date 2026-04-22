@@ -12,11 +12,14 @@ from pathlib import Path
 try:
     import pymupdf
 except ImportError:
-    sys.exit("pymupdf가 설치되지 않았습니다. 실행: pip install pymupdf4llm")
+    sys.exit("pymupdf가 설치되지 않았습니다. 실행: pip install pymupdf")
+
+
+SCHEMA_VERSION = 2
 
 
 def load_config():
-    config_path = Path(__file__).parent.parent / "references" / "caption_keywords.json"
+    config_path = Path(__file__).parent.parent / "references" / "extraction_config.json"
     if config_path.exists():
         return json.loads(config_path.read_text(encoding="utf-8"))
     return {"vision_fallback_threshold": {"min_text_chars_per_page": 100}}
@@ -33,7 +36,20 @@ def analyze_pages(doc, min_text_threshold):
         table_count = 0
         try:
             tabs = page.find_tables()
-            table_count = len(tabs.tables)
+            # 오탐 필터: 최소 2행 × 2열 + header null-safe
+            valid_tables = []
+            for t in tabs.tables:
+                try:
+                    if len(t.rows) < 2:
+                        continue
+                except Exception:
+                    continue
+                header = getattr(t, "header", None)
+                header_names = getattr(header, "names", None) if header is not None else None
+                if not header_names or len(header_names) < 2:
+                    continue
+                valid_tables.append(t)
+            table_count = len(valid_tables)
         except Exception:
             pass
 
@@ -64,20 +80,28 @@ def merge_small_chunks(chunks, target_pages=100):
     if len(chunks) <= 1:
         return chunks
 
-    merged = [chunks[0]]
+    # 병합 과정에서 title을 list로 관리 (원제목에 " + "가 포함돼도 안전)
+    working = [dict(chunks[0], _titles=[chunks[0]["title"]])]
     for chunk in chunks[1:]:
-        prev = merged[-1]
+        prev = working[-1]
         prev_size = prev["pages"][1] - prev["pages"][0] + 1
         curr_size = chunk["pages"][1] - chunk["pages"][0] + 1
 
         if prev_size + curr_size <= target_pages:
             prev["pages"][1] = chunk["pages"][1]
-            prev["title"] += " + " + chunk["title"]
+            prev["_titles"].append(chunk["title"])
         else:
-            merged.append(chunk)
+            working.append(dict(chunk, _titles=[chunk["title"]]))
 
-    for i, chunk in enumerate(merged):
+    merged = []
+    for i, chunk in enumerate(working):
+        titles = chunk.pop("_titles")
+        if len(titles) <= 3:
+            chunk["title"] = " + ".join(titles)
+        else:
+            chunk["title"] = f"{titles[0]} 외 {len(titles) - 1}개 섹션"
         chunk["chunk_id"] = i + 1
+        merged.append(chunk)
 
     return merged
 
@@ -89,6 +113,18 @@ def determine_chunks(page_count, toc):
     level1_entries = [e for e in toc if e["level"] == 1]
 
     if level1_entries:
+        # 페이지 기준 정렬 (TOC가 뒤섞인 문서 방어)
+        level1_entries = sorted(level1_entries, key=lambda e: e["page"])
+
+        # 동일 페이지에 여러 레벨1 엔트리가 있으면 제목을 " / "로 병합 (소실 방지)
+        dedup_entries = []
+        for entry in level1_entries:
+            if dedup_entries and dedup_entries[-1]["page"] == entry["page"]:
+                dedup_entries[-1]["title"] += f" / {entry['title']}"
+            else:
+                dedup_entries.append({"page": entry["page"], "title": entry["title"]})
+        level1_entries = dedup_entries
+
         chunks = []
         for i, entry in enumerate(level1_entries):
             start_page = entry["page"]
@@ -137,9 +173,15 @@ def main():
 
     structure_path = output_dir / "structure.json"
     if structure_path.exists() and not force:
-        print(f"[캐싱] 구조 분석 결과가 이미 존재합니다: {structure_path}")
-        print(json.loads(structure_path.read_text(encoding="utf-8")).get("metadata", {}))
-        return
+        cached = json.loads(structure_path.read_text(encoding="utf-8"))
+        cached_version = cached.get("schema_version")
+        if cached_version == SCHEMA_VERSION:
+            print(f"[캐싱] 구조 분석 결과가 이미 존재합니다: {structure_path}")
+            print(cached.get("metadata", {}))
+            return
+        print(
+            f"[캐시 무효] 스키마 버전 불일치 (캐시={cached_version}, 현재={SCHEMA_VERSION}) — 재분석"
+        )
 
     config = load_config()
     min_text = config["vision_fallback_threshold"]["min_text_chars_per_page"]
@@ -177,6 +219,7 @@ def main():
     }
 
     result = {
+        "schema_version": SCHEMA_VERSION,
         "metadata": metadata,
         "toc": toc,
         "pages": pages,

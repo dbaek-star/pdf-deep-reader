@@ -1,0 +1,10 @@
+{
+  "schema_version": 2,
+  "vision_fallback_threshold": {
+    "min_text_chars_per_page": 100
+  },
+  "image_size_filter": {
+    "min_bytes": 10240,
+    "min_pixels": 10000
+  }
+}
