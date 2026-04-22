@@ -53,6 +53,9 @@ Bash로 analyze_structure.py를 실행한다 (timeout: 7200000):
 
 ```bash
 python "SKILL_DIR/scripts/analyze_structure.py" "{pdf_path}" "{output_dir}"
+
+# 사용자가 "다시 분석" / "재추출" / "캐시 무시"를 요청한 경우에만:
+python "SKILL_DIR/scripts/analyze_structure.py" "{pdf_path}" "{output_dir}" --force
 ```
 
 실행 후 `{output_dir}/structure.json`을 Read로 읽는다.
@@ -71,6 +74,9 @@ Bash로 extract_content.py를 실행한다 (timeout: 7200000):
 
 ```bash
 python "SKILL_DIR/scripts/extract_content.py" "{pdf_path}" "{output_dir}" --structure "{output_dir}/structure.json"
+
+# 사용자가 "다시 분석" / "재추출" / "캐시 무시"를 요청한 경우에만:
+python "SKILL_DIR/scripts/extract_content.py" "{pdf_path}" "{output_dir}" --structure "{output_dir}/structure.json" --force
 ```
 
 실행 후 `{output_dir}/extract_meta.json`을 Read로 읽어서 비전 분석 대상을 파악한다.

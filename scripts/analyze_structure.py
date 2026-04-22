@@ -5,9 +5,28 @@ analyze_structure.py — Pass 1: PDF 구조 분석 + 청킹 단위 결정
 출력:   <output_dir>/structure.json
 """
 
+import io
 import sys
 import json
 from pathlib import Path
+
+
+def _ensure_utf8_console():
+    """Windows cp949 등 비-utf8 콘솔에서 한국어 print 깨짐 방지.
+    reconfigure 미지원(Python 3.6 이하 또는 stdout 치환 런타임) 환경에서는 조용히 넘어감."""
+    for stream in (sys.stdout, sys.stderr):
+        if not hasattr(stream, "reconfigure"):
+            continue
+        encoding = getattr(stream, "encoding", None) or ""
+        if encoding.lower() == "utf-8":
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, io.UnsupportedOperation, OSError):
+            pass
+
+
+_ensure_utf8_console()
 
 try:
     import pymupdf
@@ -36,7 +55,8 @@ def analyze_pages(doc, min_text_threshold):
         table_count = 0
         try:
             tabs = page.find_tables()
-            # 오탐 필터: 최소 2행 × 2열 + header null-safe
+            # 오탐 필터: 최소 2행 × 2열. header는 옵션 메타데이터로 강등.
+            # (header 기반 gate는 header 미감지 표를 누락시켜 완전성 원칙 위반)
             valid_tables = []
             for t in tabs.tables:
                 try:
@@ -44,9 +64,17 @@ def analyze_pages(doc, min_text_threshold):
                         continue
                 except Exception:
                     continue
-                header = getattr(t, "header", None)
-                header_names = getattr(header, "names", None) if header is not None else None
-                if not header_names or len(header_names) < 2:
+
+                col_count = getattr(t, "col_count", None)
+                if col_count is None:
+                    # 구버전 pymupdf 방어: 추출 결과에서 열 수 추정
+                    try:
+                        extracted = t.extract()
+                        col_count = max((len(r) for r in extracted), default=0)
+                    except Exception:
+                        col_count = 0
+
+                if col_count < 2:
                     continue
                 valid_tables.append(t)
             table_count = len(valid_tables)
